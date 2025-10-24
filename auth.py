@@ -1,10 +1,25 @@
 import json
 from db import Database
+from argon2 import PasswordHasher 
+from argon2.exceptions import VerifyMismatchError
+
+ph = PasswordHasher()
 
 async def handle_register(data, websocket):
     username = data.get("username")
-    password_hash = data.get("password_hash")
+    plain_password = data.get("password")
+    
+    if not username or not plain_password:
+        await websocket.send(json.dumps({"type": "auth_response", "status": "SERVER_ERROR", "message": "Missing fields"}))
+        return
 
+    try:
+        hashed_password = ph.hash(plain_password)
+    except Exception as e:
+        print(f"[Erro de Hashing] {e}")
+        await websocket.send(json.dumps({"type": "auth_response", "status": "SERVER_ERROR", "message": "Hashing failed"}))
+        return
+    
     with Database() as db:
         if not db:
             await websocket.send(json.dumps({"type": "auth_response", "status": "SERVER_ERROR"}))
@@ -15,13 +30,13 @@ async def handle_register(data, websocket):
             await websocket.send(json.dumps({"type": "auth_response", "status": "REGISTER_FAILED:USERNAME_EXISTS"}))
         else:
             query_insert = "INSERT INTO usuarios (userName, senha) VALUES (%s, %s);"
-            db.execute_query(query_insert, (username, password_hash))
+            db.execute_query(query_insert, (username, hashed_password))
             await websocket.send(json.dumps({"type": "auth_response", "status": "REGISTER_SUCCESS"}))
 
 
 async def handle_login(data, websocket, online_clients):
     username = data.get("username")
-    password_hash = data.get("password_hash")
+    plain_password = data.get("password")
 
     with Database() as db:
         if not db:
@@ -31,10 +46,25 @@ async def handle_login(data, websocket, online_clients):
         query = "SELECT senha FROM usuarios WHERE userName = %s;"
         result = db.fetch_all(query, (username,))
         
-        if result and result[0]['senha'] == password_hash:
-            online_clients[username] = websocket
-            await websocket.send(json.dumps({"type": "auth_response", "status": "LOGIN_SUCCESS"}))
-            return username  
+        if result:
+            stored_hash = result[0]['senha']
+            try:
+                ph.verify(stored_hash, plain_password)
+                
+                online_clients[username] = websocket
+                await websocket.send(json.dumps({"type": "auth_response", "status": "LOGIN_SUCCESS"}))
+                return username
+            
+            #senha incorreta
+            except VerifyMismatchError:
+                await websocket.send(json.dumps({"type": "auth_response", "status": "LOGIN_FAILED"}))
+                return None
+            
+            #outro erro qualquer
+            except Exception as e:
+                print(f"[Erro de Verificação] {e}")
+                await websocket.send(json.dumps({"type": "auth_response", "status": "LOGIN_FAILED"}))
+                return None
         else:
             await websocket.send(json.dumps({"type": "auth_response", "status": "LOGIN_FAILED"}))
             return None 

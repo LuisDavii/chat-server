@@ -9,7 +9,7 @@ async def broadcast_user_list(online_clients):
 
     print("[Broadcast] Enviando lista de usuários atualizada...")
     all_users = []
-    unread_message_recipients = set()
+    
     with Database() as db:
         if db:
             rows = db.fetch_all("SELECT userName FROM usuarios;")
