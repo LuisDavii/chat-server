@@ -11,6 +11,7 @@ async def handler(websocket, path):
 
     current_user = None
     try:
+        print("[Conexão] Novo cliente conectado.")
         auth_message = await websocket.recv()
         data = json.loads(auth_message)
         command = data.get("type")
